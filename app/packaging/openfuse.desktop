@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=OpenFuse
+GenericName=Audio Interface Control
+Comment=Control panel for Arturia MiniFuse audio interfaces
+Exec=openfuse
+Icon=openfuse
+Terminal=false
+Categories=AudioVideo;Audio;Settings;
+Keywords=MiniFuse;Arturia;audio;interface;phantom;48V;mixer;
+StartupWMClass=openfuse

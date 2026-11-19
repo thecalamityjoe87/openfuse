@@ -1,0 +1,48 @@
+[package]
+name = "openfuse"
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+edition = "2024"
+rust-version = "1.88"
+description = "Control panel for Arturia MiniFuse audio interfaces on Linux (talks to the OpenFuse ALSA controls)"
+publish = false
+
+[lib]
+name = "openfuse"
+path = "src/lib.rs"
+
+[[bin]]
+name = "openfuse"
+path = "src/main.rs"
+
+[dependencies]
+# wgpu renderer (GPU, dlopen'ed at run time; needed for transparent rounded
+# windows on Wayland) with the tiny-skia software renderer as fallback.
+iced = { version = "0.14", default-features = false, features = [
+    "tiny-skia", "canvas", "image-without-codecs", "x11", "wayland",
+    "linux-theme-detection", "crisp", "smol", "sysinfo",
+] }
+resvg = { version = "0.45", default-features = false, features = ["text"] }
+roxmltree = "0.20"
+alsa-sys = "0.6"
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
+zbus = { version = "5", default-features = false, features = ["async-io"] }
+libc = "0.2"
+
+[features]
+default = ["gpu"]
+# GPU renderer (wgpu: Vulkan / GL, loaded at run time, falls back to the
+# tiny-skia software renderer). Without it the binary is smaller and the
+# window keeps square corners (software presentation has no alpha).
+gpu = ["iced/wgpu"]
+
+[dev-dependencies]
+iced_test = "0.14"
+png = "0.18"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true

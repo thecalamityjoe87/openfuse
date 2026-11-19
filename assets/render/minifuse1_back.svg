@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="130 400 1740 520" width="1740" height="520">
+<defs>
+  <radialGradient id="g-knob" cx="40%" cy="35%" r="75%">
+    <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#fbfbfc"/></radialGradient>
+  <radialGradient id="g-metal" cx="45%" cy="40%" r="60%">
+    <stop offset="0" stop-color="#e6e8ea"/><stop offset="1" stop-color="#b9bdc2"/></radialGradient>
+  <radialGradient id="g-blue" cx="50%" cy="45%" r="55%">
+    <stop offset="0" stop-color="#bfe6fb"/><stop offset="1" stop-color="#7cc8f0"/></radialGradient>
+  <radialGradient id="g-red" cx="50%" cy="45%" r="55%">
+    <stop offset="0" stop-color="#fbc4c4"/><stop offset="1" stop-color="#f07a7a"/></radialGradient>
+  <filter id="f-shadow" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="10" stdDeviation="11" flood-color="#000" flood-opacity="0.42"/></filter>
+  <style>
+    text{font-family:'Barlow Condensed','Roboto Condensed','DIN Condensed','Arial Narrow',sans-serif;fill:#3b4148;text-anchor:middle;dominant-baseline:central}
+    .led-off{opacity:.35}
+    .btn.off .lens{fill:#e7eaed}
+  </style>
+</defs>
+<rect x="160" y="437" width="1677" height="426" rx="24" fill="#f3f4f5" stroke="#d5d9dd" stroke-width="4" filter="url(#f-shadow)"/>
+<rect x="178" y="454" width="1640" height="386" rx="8" fill="none" stroke="#c9ced3" stroke-width="3"/>
+<rect x="361" y="608" width="36" height="80" rx="9.0" fill="#16181b"/>
+<text x="672" y="512" font-size="34" font-weight="500" letter-spacing="1">OUTPUTS</text>
+<line x1="481" y1="538" x2="863" y2="538" stroke="#3b4148" stroke-width="2"/>
+<text x="560" y="586" font-size="32" font-weight="500" letter-spacing="1">L</text>
+<text x="782" y="586" font-size="32" font-weight="500" letter-spacing="1">R</text>
+<g id="out-L" class="jack"><circle cx="560" cy="707" r="58" fill="url(#g-metal)" stroke="#7d8287" stroke-width="2"/><circle cx="560" cy="707" r="46.4" fill="#16181b"/><circle cx="560" cy="707" r="29.0" fill="#000"/></g>
+<g id="out-R" class="jack"><circle cx="780" cy="707" r="58" fill="url(#g-metal)" stroke="#7d8287" stroke-width="2"/><circle cx="780" cy="707" r="46.4" fill="#16181b"/><circle cx="780" cy="707" r="29.0" fill="#000"/></g>
+<g stroke="#3b4148" stroke-width="3.0" fill="none" stroke-linecap="round"><path d="M1300.0,511 H1348.0"/><path d="M1318.0,511 L1327,500.2 H1336.0"/><path d="M1324.0,511 L1331.8,520.6 H1339.0"/></g><circle cx="1300.0" cy="511" r="4.8" fill="#3b4148"/><path d="M1348.0,506.2 L1357.0,511 L1348.0,515.8 Z" fill="#3b4148"/><circle cx="1337.2" cy="500.2" r="3.0" fill="#3b4148"/><rect x="1337.8" y="517.6" width="6.0" height="6.0" fill="#3b4148"/>
+<line x1="1142" y1="538" x2="1512" y2="538" stroke="#3b4148" stroke-width="2"/>
+<text x="1216" y="586" font-size="32" font-weight="500" letter-spacing="1">HUB</text>
+<g id="usb-hub1" class="port usb-a"><rect x="1187" y="627" width="58" height="141" rx="3" fill="url(#g-metal)" stroke="#6f7479" stroke-width="2"/><rect x="1195.1" y="634.0" width="41.8" height="126.9" fill="#2a2d31"/><rect x="1197.4" y="638.3" width="17.4" height="118.4" fill="#efe9dc"/></g>
+<rect x="1400.6" y="656.2" width="64.8" height="43.2" rx="2.7" fill="none" stroke="#3b4148" stroke-width="3.6"/><path d="M1389.8,712.0 L1397.0,703.0 H1469.0 L1476.2,712.0 Z" fill="none" stroke="#3b4148" stroke-width="3.6" stroke-linejoin="round"/>
+<g id="usb-host" class="port usb-c"><rect x="1383.0" y="742.0" width="100" height="34" rx="17.0" fill="url(#g-metal)" stroke="#6f7479" stroke-width="2"/><rect x="1393.0" y="748.8" width="80.0" height="20.4" rx="10.2" fill="#16181b"/><rect x="1405.0" y="757.0" width="56.0" height="4.1" fill="#b9bdc2"/></g>
+</svg>

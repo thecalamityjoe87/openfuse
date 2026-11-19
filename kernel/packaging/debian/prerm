@@ -1,0 +1,27 @@
+#!/bin/sh
+# prerm for openfuse-dkms: remove the DKMS module from all kernels and make
+# sure the distribution's snd-usb-audio is back in place everywhere.
+# Tolerates a missing dkms or module; always exits 0.
+
+NAME=openfuse
+
+@CLEANUP@
+
+case "$1" in
+remove|upgrade|deconfigure|failed-upgrade)
+	_kernels=""
+	if command -v dkms >/dev/null 2>&1; then
+		_status="$(dkms status -m "$NAME" 2>/dev/null || true)"
+		_kernels="$(printf '%s\n' "$_status" | sed -n "s#^$NAME/[^,]*, \([^,]*\), .*#\1#p")"
+		for _v in $(printf '%s\n' "$_status" | sed -n "s#^$NAME/\([^,:]*\)[,:].*#\1#p" | sort -u); do
+			case "$_v" in ''|*[!A-Za-z0-9._+~-]*) continue ;; esac
+			dkms remove -m "$NAME" -v "$_v" --all >/dev/null 2>&1 ||
+				warn "dkms remove $NAME/$_v failed; cleaning up directly"
+		done
+	fi
+	restore_and_sweep "$_kernels"
+	rm -f "$RUNDIR/fallback" 2>/dev/null || true
+	;;
+esac
+
+exit 0

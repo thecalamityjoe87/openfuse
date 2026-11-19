@@ -1,0 +1,57 @@
+# --- shared by prerm and postrm (inserted by mkdeb.sh) ---
+LC_ALL=C
+export LC_ALL
+# fixed paths (the test suite substitutes this block)
+MODROOT=/lib/modules
+DKMSTREE=/var/lib/dkms
+DEPMOD=/sbin/depmod
+MODINFO=/sbin/modinfo
+RUNDIR=/run/openfuse
+CACHEDIR=/var/cache/openfuse
+CONFDIR=/etc/openfuse
+SRCROOT=/usr/src
+# end of fixed paths
+
+warn() { echo "openfuse-dkms: $*" >&2; }
+
+is_openfuse() { [ -n "$("$MODINFO" -F openfuse "$1" 2>/dev/null)" ]; }
+
+# Remove OpenFuse modules dkms left behind, put back any distribution
+# module dkms archived and did not restore, and run depmod for every
+# kernel that changed or is listed in $1.
+restore_and_sweep() {
+	_touched="${1:-}"
+	for _kdir in "$MODROOT"/*/; do
+		[ -d "$_kdir" ] || continue
+		_kver="$(basename "$_kdir")"
+		case "$_kver" in ''|*[!A-Za-z0-9._+-]*) continue ;; esac
+		_changed=0
+		for _f in "$_kdir"updates/dkms/snd-usb-audio.ko*; do
+			[ -f "$_f" ] || continue
+			if is_openfuse "$_f"; then
+				rm -f "$_f" && _changed=1
+			fi
+		done
+		for _origin in "$DKMSTREE"/openfuse/original_module/"$_kver"/*/snd-usb-audio.ko*.origin; do
+			[ -f "$_origin" ] || continue
+			_mod="${_origin%.origin}"
+			[ -f "$_mod" ] || continue
+			is_openfuse "$_mod" && continue
+			_dest="$(head -n 1 "$_origin")"
+			case "$_dest" in
+			"$MODROOT/$_kver/"*) ;;
+			*) continue ;;
+			esac
+			case "$_dest" in *..*) continue ;; esac
+			if [ ! -e "$_dest" ]; then
+				mkdir -p "$(dirname "$_dest")" && cp -p "$_mod" "$_dest" && _changed=1
+			fi
+		done
+		[ "$_changed" = 1 ] && _touched="$_touched $_kver"
+	done
+	for _kver in $(echo "$_touched" | tr ' ' '\n' | sort -u); do
+		[ -d "$MODROOT/$_kver" ] || continue
+		"$DEPMOD" -a "$_kver" >/dev/null 2>&1 || warn "depmod -a $_kver failed"
+	done
+}
+# --- end of shared part ---

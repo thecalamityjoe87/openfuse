@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenFuse contributors <openfuse@invalid>
+Date: Sun, 15 Nov 2026 21:30:00 -0600
+Subject: [PATCH] ALSA: usb-audio: Meter MiniFuse playback in the PCM path
+
+The Arturia MiniFuse does not meter the audio it plays, and an application
+that opens the card's hw: device directly bypasses the sound server, so
+userspace has no place to measure it. The driver sees every sample it
+sends, so hand the outgoing data of each playback URB to the MiniFuse
+quirk, which keeps the peak per channel and exposes it as a read-only
+"Playback Level Meter" control.
+
+Only plain PCM URBs of the MiniFuse 2 (1c75:af90) are passed on; the
+quirk ignores formats other than S16_LE, S24_3LE and S32_LE.
+
+Signed-off-by: OpenFuse contributors <openfuse@invalid>
+---
+ sound/usb/pcm.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/sound/usb/pcm.c b/sound/usb/pcm.c
+--- a/sound/usb/pcm.c
++++ b/sound/usb/pcm.c
+@@ -24,6 +24,7 @@
+ #include "power.h"
+ #include "media.h"
+ #include "implicit.h"
++#include "mixer_minifuse.h"
+ 
+ #define SUBSTREAM_FLAG_DATA_EP_STARTED	0
+ #define SUBSTREAM_FLAG_SYNC_EP_STARTED	1
+@@ -1613,6 +1614,13 @@
+ 			else
+ 				bytes = copy_to_urb_quirk(subs, urb, stride, bytes);
+ 			/* bytes is now amount of outgoing data */
++			if (!subs->tx_length_quirk &&
++			    subs->stream->chip->usb_id == USB_ID(0x1c75, 0xaf90))
++				snd_minifuse_playback_tap(subs->stream->chip,
++							  urb->transfer_buffer,
++							  bytes,
++							  subs->cur_audiofmt->channels,
++							  ep->cur_format);
+ 		}
+ 
+ 		subs->last_frame_number = usb_get_current_frame_number(subs->dev);

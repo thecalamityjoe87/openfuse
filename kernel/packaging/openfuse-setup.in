@@ -1,0 +1,380 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+#
+# openfuse-setup - privileged helper for the OpenFuse installer.
+# Installed as /usr/libexec/openfuse/openfuse-setup; run through pkexec
+# (polkit action org.openfuse.setup).
+#
+# Usage: openfuse-setup VERB
+#
+#   status         report the setup state (does not need root)
+#   enroll         read the one-time MOK password from stdin, queue the
+#                  DKMS signing key for enrollment (mokutil --import), then
+#                  build and install the module for the running kernel
+#   build          (re)build and install the module for the running kernel
+#   restore-stock  remove the module for the running kernel, so the
+#                  distribution's snd-usb-audio is used again
+#
+# stdin (enroll only): the password twice, each line terminated by "\n":
+#   "<password>\n<password>\n". 1-256 printable ASCII characters (0x20-0x7E;
+#   MokManager's keyboard input cannot reliably reproduce anything else).
+#   The password is never taken from argv or the environment and is only
+#   ever passed on through a pipe (shell builtin printf -> mokutil stdin).
+#
+# stdout: machine-readable "key=value" lines, one per line, keys
+#   [a-z_]+, values without spaces except "message". Human-readable
+#   diagnostics go to stderr.
+#
+# Exit status:
+#   0  success
+#   1  internal error
+#   2  usage error (unknown verb, extra arguments)
+#   3  skipped: module not installed for the running kernel (key neither
+#      enrolled nor pending, no kernel headers, or no usable sources)
+#   4  module build failed
+#   5  enrollment failed (bad password input, no key, mokutil error)
+#   6  must be run as root (verbs other than status)
+#   7  dkms or the OpenFuse DKMS sources are missing
+
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+LC_ALL=C
+export LC_ALL
+umask 022
+
+NAME=openfuse
+VERSION=@VERSION@
+# --- fixed paths (the test suite substitutes this block) ---
+LIBDIR=/usr/libexec/openfuse
+SRCDIR=/usr/src/$NAME-$VERSION
+SYSMOD=/sys/module
+RUNDIR=/run/openfuse
+MODROOT=/lib/modules
+# --- end of fixed paths ---
+
+EX_OK=0
+EX_ERR=1
+EX_USAGE=2
+EX_SKIPPED=3
+EX_BUILD=4
+EX_ENROLL=5
+EX_PERM=6
+EX_NODKMS=7
+
+out() { printf '%s=%s\n' "$1" "$2"; }
+msg() { printf 'openfuse-setup: %s\n' "$*" >&2; }
+
+usage() {
+	msg "usage: openfuse-setup {status|enroll|build|restore-stock}"
+	exit $EX_USAGE
+}
+
+# ---------------------------------------------------------------------------
+# Arguments: exactly one verb from a fixed list
+
+[ $# -eq 1 ] || usage
+case "$1" in
+status|enroll|build|restore-stock) VERB="$1" ;;
+*) usage ;;
+esac
+
+# shellcheck source=../openfuse-mok.sh
+. "$LIBDIR/openfuse-mok.sh"
+
+KVER="$(uname -r)"
+case "$KVER" in
+''|*[!A-Za-z0-9._+-]*)
+	msg "unexpected kernel release string"
+	exit $EX_ERR
+	;;
+esac
+
+# ---------------------------------------------------------------------------
+# State queries
+
+have_headers() { [ -f "$MODROOT/$KVER/build/Makefile" ]; }
+
+# installed | built | added | not-added | unknown
+dkms_state() {
+	command -v dkms >/dev/null 2>&1 || { echo unknown; return 0; }
+	_st="$(dkms status -m "$NAME" -v "$VERSION" -k "$KVER" 2>/dev/null | head -n 1 || true)"
+	if [ -z "$_st" ]; then
+		_st="$(dkms status -m "$NAME" -v "$VERSION" 2>/dev/null | head -n 1 || true)"
+		[ -n "$_st" ] && { echo added; return 0; }
+		echo not-added
+		return 0
+	fi
+	case "${_st##*: }" in
+	installed*) echo installed ;;
+	built*) echo built ;;
+	added*) echo added ;;
+	*) echo unknown ;;
+	esac
+}
+
+# openfuse | stock | none
+module_loaded() {
+	if [ -e "$SYSMOD/snd_usb_audio/parameters/minifuse_poll_ms" ]; then
+		echo openfuse
+	elif [ -d "$SYSMOD/snd_usb_audio" ]; then
+		echo stock
+	else
+		echo none
+	fi
+}
+
+need_root() {
+	if [ "$(id -u)" != 0 ]; then
+		msg "$VERB must be run as root (pkexec $LIBDIR/openfuse-setup $VERB)"
+		exit $EX_PERM
+	fi
+}
+
+need_dkms() {
+	if ! command -v dkms >/dev/null 2>&1 || [ ! -f "$SRCDIR/dkms.conf" ]; then
+		msg "dkms or $SRCDIR is missing (is openfuse-dkms installed?)"
+		exit $EX_NODKMS
+	fi
+}
+
+# ---------------------------------------------------------------------------
+# Actions
+
+# (Re)build and install for the running kernel. Prints build= (and
+# reason=); returns an exit status.
+build_install() {
+	if ! have_headers; then
+		out build skipped
+		out reason no-headers
+		msg "kernel headers for $KVER are not installed (linux-headers-$KVER)"
+		return $EX_SKIPPED
+	fi
+
+	if of_sig_enforced; then
+		of_ensure_key || msg "could not create the signing key"
+		of_mok_paths
+		case "$(of_key_state "$OF_MOK_CERT")" in
+		enrolled|pending) ;;
+		*)
+			out build skipped
+			out reason key-not-enrolled
+			msg "Secure Boot: $OF_MOK_CERT is neither enrolled nor pending; run 'enroll'"
+			return $EX_SKIPPED
+			;;
+		esac
+	fi
+
+	case "$(dkms_state)" in
+	not-added)
+		if ! dkms add -m "$NAME" -v "$VERSION" >&2; then
+			out build failed
+			out reason dkms-add
+			return $EX_BUILD
+		fi
+		;;
+	installed|built)
+		# force a fresh build (repair)
+		dkms remove -m "$NAME" -v "$VERSION" -k "$KVER" >&2 || true
+		;;
+	esac
+
+	_rc=0
+	dkms install -m "$NAME" -v "$VERSION" -k "$KVER" >&2 || _rc=$?
+	case "$_rc" in
+	0)
+		out build installed
+		return $EX_OK
+		;;
+	77)
+		out build skipped
+		out reason no-sources
+		out log "/var/lib/dkms/$NAME/$VERSION/build/make.log"
+		return $EX_SKIPPED
+		;;
+	*)
+		out build failed
+		out reason dkms-install
+		out log "/var/lib/dkms/$NAME/$VERSION/build/make.log"
+		return $EX_BUILD
+		;;
+	esac
+}
+
+do_status() {
+	of_mok_paths
+	out version "$VERSION"
+	out kernel "$KVER"
+	out secure_boot "$(of_secure_boot)"
+	if of_sig_enforced; then out signature_enforced yes; else out signature_enforced no; fi
+	out cert "$OF_MOK_CERT"
+	out key_state "$(of_key_state "$OF_MOK_CERT")"
+	out key_modsign_only "$(of_key_modsign_only "$OF_MOK_CERT")"
+	if have_headers; then out headers yes; else out headers no; fi
+	_ds="$(dkms_state)"
+	_ml="$(module_loaded)"
+	out dkms_state "$_ds"
+	out module_loaded "$_ml"
+	# our module is installed for this kernel, but the stock one is loaded:
+	# openfuse-modprobe fell back (or the module was loaded before install)
+	if [ "$_ds" = installed ] && [ "$_ml" = stock ]; then
+		out fallback_active yes
+	else
+		out fallback_active no
+	fi
+	if [ -r "$RUNDIR/fallback" ]; then
+		_fr="$(sed -n 's/^reason=//p' "$RUNDIR/fallback" | head -n 1 | tr -cd ' -~')"
+		[ -n "$_fr" ] && out fallback_reason "$_fr"
+	fi
+	return $EX_OK
+}
+
+# Read and validate the password from stdin into PW.
+read_password() {
+	PW=""
+	_pw2=""
+	IFS= read -r PW || { msg "expected the password twice on stdin"; return 1; }
+	IFS= read -r _pw2 || [ -n "$_pw2" ] || { msg "expected the password twice on stdin"; return 1; }
+	if [ "$PW" != "$_pw2" ]; then
+		msg "the two passwords do not match"
+		return 1
+	fi
+	_pw2=""
+	if [ ${#PW} -lt 1 ] || [ ${#PW} -gt 256 ]; then
+		msg "the password must be 1-256 characters"
+		return 1
+	fi
+	# printable ASCII only: delete 0x20-0x7E; anything left is invalid
+	if [ -n "$(printf '%s' "$PW" | tr -d ' -~')" ]; then
+		msg "the password may only contain printable ASCII characters"
+		return 1
+	fi
+	return 0
+}
+
+# Number of keys in pending enrollment requests
+pending_count() {
+	mokutil --list-new 2>/dev/null | grep -c '^\[key [0-9]*\]' || true
+}
+
+do_enroll() {
+	need_root
+	need_dkms
+
+	if ! read_password; then
+		PW=""
+		out enroll failed
+		out reason bad-password
+		return $EX_ENROLL
+	fi
+
+	if ! of_sig_enforced || [ "$(of_secure_boot)" != enabled ]; then
+		PW=""
+		out enroll not-needed
+		out reboot not-required
+		build_install
+		return $?
+	fi
+
+	if ! command -v mokutil >/dev/null 2>&1; then
+		PW=""
+		out enroll failed
+		out reason no-mokutil
+		return $EX_ENROLL
+	fi
+	if ! of_ensure_key; then
+		PW=""
+		out enroll failed
+		out reason no-key
+		return $EX_ENROLL
+	fi
+	of_mok_paths
+
+	_state="$(of_key_state "$OF_MOK_CERT")"
+	_result=imported
+	case "$_state" in
+	enrolled)
+		_result=already-enrolled
+		;;
+	pending)
+		# Re-queue with the new password, but only if our key is the
+		# only pending request: --revoke-import drops all of them.
+		if [ "$(pending_count)" = 1 ]; then
+			mokutil --revoke-import >/dev/null 2>&1 || true
+			_state="$(of_key_state "$OF_MOK_CERT")"
+			_result=re-imported
+		else
+			_result=already-pending
+		fi
+		;;
+	blocked)
+		PW=""
+		out enroll failed
+		out reason key-blocked
+		return $EX_ENROLL
+		;;
+	esac
+
+	if [ "$_state" = not-enrolled ]; then
+		if ! printf '%s\n%s\n' "$PW" "$PW" | mokutil --import "$OF_MOK_CERT" >/dev/null 2>&1; then
+			PW=""
+			out enroll failed
+			out reason mokutil-import
+			return $EX_ENROLL
+		fi
+		if [ "$(of_key_state "$OF_MOK_CERT")" != pending ]; then
+			PW=""
+			out enroll failed
+			out reason not-pending-after-import
+			return $EX_ENROLL
+		fi
+	fi
+	PW=""
+
+	out enroll "$_result"
+	out cert "$OF_MOK_CERT"
+	case "$_result" in
+	already-enrolled) out reboot not-required ;;
+	*) out reboot required ;;
+	esac
+	build_install
+}
+
+do_build() {
+	need_root
+	need_dkms
+	build_install
+}
+
+do_restore_stock() {
+	need_root
+	need_dkms
+	case "$(dkms_state)" in
+	installed|built)
+		if ! dkms remove -m "$NAME" -v "$VERSION" -k "$KVER" >&2; then
+			out restore failed
+			return $EX_ERR
+		fi
+		out restore removed
+		;;
+	*)
+		out restore nothing-to-do
+		;;
+	esac
+	# If no snd-usb-audio is loaded (e.g. ours was rejected), load the
+	# stock one now so audio comes back without a reboot.
+	if [ "$(module_loaded)" = none ]; then
+		modprobe snd-usb-audio >/dev/null 2>&1 || true
+	fi
+	out module_loaded "$(module_loaded)"
+	return $EX_OK
+}
+
+rc=$EX_OK
+case "$VERB" in
+status) do_status || rc=$? ;;
+enroll) do_enroll || rc=$? ;;
+build) do_build || rc=$? ;;
+restore-stock) do_restore_stock || rc=$? ;;
+esac
+exit $rc

@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenFuse contributors <openfuse@invalid>
+Date: Sun, 15 Nov 2026 17:04:24 -0600
+Subject: [PATCH] ALSA: usb-audio: Hook up Arturia MiniFuse mixer quirk
+
+The Arturia MiniFuse interfaces control their front-panel switches
+(INST, 48V, DIRECT MONO), the loopback mixer and the level meters with
+vendor-defined class requests on the audio control interface, which
+snd-usb-audio owns, so userspace cannot send them without detaching
+the driver.
+
+Call the MiniFuse mixer quirk for the MiniFuse 2 (1c75:af90) and build
+it as part of snd-usb-audio. The quirk itself lives in
+mixer_minifuse.c / mixer_minifuse.h.
+
+Signed-off-by: OpenFuse contributors <openfuse@invalid>
+---
+ sound/usb/Makefile       | 1 +
+ sound/usb/mixer_quirks.c | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/sound/usb/Makefile b/sound/usb/Makefile
+index e62794a..08b037b 100644
+--- a/sound/usb/Makefile
++++ b/sound/usb/Makefile
+@@ -12,6 +12,7 @@ snd-usb-audio-y := 	card.o \
+ 			implicit.o \
+ 			mixer.o \
+ 			mixer_quirks.o \
++			mixer_minifuse.o \
+ 			mixer_scarlett.o \
+ 			mixer_scarlett2.o \
+ 			mixer_us16x08.o \
+diff --git a/sound/usb/mixer_quirks.c b/sound/usb/mixer_quirks.c
+index fc622eb..d90ec7d 100644
+--- a/sound/usb/mixer_quirks.c
++++ b/sound/usb/mixer_quirks.c
+@@ -34,6 +34,7 @@
+ #include "usbaudio.h"
+ #include "mixer.h"
+ #include "mixer_quirks.h"
++#include "mixer_minifuse.h"
+ #include "mixer_scarlett.h"
+ #include "mixer_scarlett2.h"
+ #include "mixer_us16x08.h"
+@@ -4604,6 +4605,9 @@ int snd_usb_mixer_apply_create_quirk(struct usb_mixer_interface *mixer)
+ 	case USB_ID(0x03f0, 0x0269): /* HP TB Dock G2 */
+ 		err = hp_dock_mixer_create(mixer);
+ 		break;
++	case USB_ID(0x1c75, 0xaf90): /* Arturia MiniFuse 2 */
++		err = snd_minifuse_init(mixer);
++		break;
+ 	}
+ 
+ 	return err;

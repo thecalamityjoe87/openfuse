@@ -1,0 +1,161 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+#
+# openfuse-modprobe - load snd_usb_audio; if the OpenFuse build cannot be
+# loaded, load the distribution's module instead.
+#
+# Installed as /usr/libexec/openfuse/openfuse-modprobe and called by kmod
+# for every load of snd_usb_audio (boot, hotplug, manual modprobe) through
+# /usr/lib/modprobe.d/openfuse-fallback.conf:
+#
+#   install snd_usb_audio <this script> $CMDLINE_OPTS
+#
+# 1. modprobe --ignore-install snd_usb_audio "$@"   (normal load; with the
+#    package installed this resolves to updates/dkms/, i.e. OpenFuse)
+# 2. If that fails and the module it tried is not the distribution's:
+#    find the distribution's module (in-tree path, else the copy dkms
+#    archived), load its dependencies, insmod it with the configured
+#    options, log one line to the kernel log and record the reason in
+#    /run/openfuse/fallback.
+#
+# Design rules: no network, no dkms, only kmod tools and coreutils/sed,
+# absolute paths, no "set -e". Every step that is not essential is allowed
+# to fail. Exit status: 0 if a snd_usb_audio module is loaded at the end,
+# else the error status of the last load attempt.
+
+set -u
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+LC_ALL=C
+export PATH LC_ALL
+
+# --- fixed paths (the test suite substitutes this block) ---
+MODPROBE=/sbin/modprobe
+INSMOD=/sbin/insmod
+MODINFO=/sbin/modinfo
+MODROOT=/lib/modules
+SYSMOD=/sys/module
+DKMSTREE=/var/lib/dkms
+RUNDIR=/run/openfuse
+KMSG=/dev/kmsg
+LOGGER=/usr/bin/logger
+# --- end of fixed paths ---
+
+MOD=snd_usb_audio
+KVER="$(uname -r 2>/dev/null)" || KVER=""
+
+log() {
+	if [ -w "$KMSG" ] && printf '<4>openfuse: %s\n' "$*" > "$KMSG" 2>/dev/null; then
+		:
+	elif [ -x "$LOGGER" ]; then
+		"$LOGGER" -t openfuse -p kern.warning -- "$*" 2>/dev/null || :
+	fi
+	printf 'openfuse: %s\n' "$*" >&2
+}
+
+loaded() { [ -d "$SYSMOD/$MOD" ]; }
+
+# Short, single-line reason from a modprobe/insmod error message
+reason_of() {
+	case "$1" in
+	*"Key was rejected by service"*) echo "signature rejected: signing key not trusted (not enrolled in MOK?)" ;;
+	*"Required key not available"*) echo "module not signed with a trusted key" ;;
+	*"Unknown symbol"*|*"disagrees about version"*|*"Exec format error"*) echo "symbol/version mismatch with the running kernel" ;;
+	*"Invalid argument"*) echo "module rejected by the kernel (invalid module or version mismatch)" ;;
+	*"Operation not permitted"*) echo "loading not permitted (kernel lockdown)" ;;
+	*"not found in directory"*|*"Module "*" not found"*) echo "module file missing" ;;
+	*)
+		printf '%s' "$1" | head -n 1 | sed -e 's/^[a-z]*: ERROR: //' -e 's/[^ -~]//g' | cut -c1-120
+		;;
+	esac
+}
+
+is_openfuse() { [ -n "$("$MODINFO" -F openfuse "$1" 2>/dev/null)" ]; }
+
+# The distribution's snd-usb-audio for the running kernel: the in-tree
+# file, else the copy dkms archived when it installed OpenFuse.
+find_stock() {
+	for _f in \
+		"$MODROOT/$KVER/kernel/sound/usb/snd-usb-audio.ko.zst" \
+		"$MODROOT/$KVER/kernel/sound/usb/snd-usb-audio.ko.xz" \
+		"$MODROOT/$KVER/kernel/sound/usb/snd-usb-audio.ko.gz" \
+		"$MODROOT/$KVER/kernel/sound/usb/snd-usb-audio.ko" \
+		"$DKMSTREE"/openfuse/original_module/"$KVER"/*/snd-usb-audio.ko.zst \
+		"$DKMSTREE"/openfuse/original_module/"$KVER"/*/snd-usb-audio.ko.xz \
+		"$DKMSTREE"/openfuse/original_module/"$KVER"/*/snd-usb-audio.ko.gz \
+		"$DKMSTREE"/openfuse/original_module/"$KVER"/*/snd-usb-audio.ko; do
+		[ -f "$_f" ] || continue
+		is_openfuse "$_f" && continue
+		echo "$_f"
+		return 0
+	done
+	return 1
+}
+
+loaded && exit 0
+
+# 1. normal load
+ERR="$("$MODPROBE" --ignore-install "$MOD" "$@" 2>&1 >/dev/null)"
+RC=$?
+if [ "$RC" -eq 0 ] || loaded; then
+	rm -f "$RUNDIR/fallback" 2>/dev/null
+	exit 0
+fi
+[ "$RC" -ne 0 ] || RC=1
+
+STOCK="$(find_stock)" || STOCK=""
+RESOLVED="$("$MODINFO" -n "$MOD" 2>/dev/null)" || RESOLVED=""
+REASON="$(reason_of "$ERR")"
+
+if [ -z "$STOCK" ]; then
+	log "snd-usb-audio failed to load ($REASON) and the standard module for $KVER was not found"
+	exit "$RC"
+fi
+if [ "$RESOLVED" = "$STOCK" ]; then
+	# the standard module itself failed; nothing to fall back to
+	printf '%s\n' "$ERR" >&2
+	exit "$RC"
+fi
+
+# 2. fallback: dependencies of the standard module (normally already
+#    loaded by step 1), loaded the normal way
+DEPS="$("$MODINFO" -F depends "$STOCK" 2>/dev/null)" || DEPS=""
+OLDIFS="$IFS"
+IFS=,
+for _d in $DEPS; do
+	IFS="$OLDIFS"
+	case "$_d" in
+	''|*[!A-Za-z0-9_-]*) continue ;;
+	esac
+	"$MODPROBE" -q "$_d" >/dev/null 2>&1 || :
+done
+IFS="$OLDIFS"
+
+# options: what modprobe would pass (configuration + command line), minus
+# OpenFuse-only parameters; if that cannot be determined, the command line
+OPTS="$("$MODPROBE" --ignore-install --show-depends "$MOD" "$@" 2>/dev/null |
+	sed -n 's#^insmod [^ ]*/snd-usb-audio\.ko[^ ]*##p' | tail -n 1)" || OPTS=""
+[ -n "$OPTS" ] || OPTS="$*"
+set -f
+set --
+for _o in $OPTS; do
+	case "$_o" in
+	minifuse_*) ;;
+	*) set -- "$@" "$_o" ;;
+	esac
+done
+set +f
+
+ERR2="$("$INSMOD" "$STOCK" "$@" 2>&1 >/dev/null)"
+RC2=$?
+if [ "$RC2" -eq 0 ] || loaded; then
+	log "driver rejected ($REASON), using the standard snd-usb-audio"
+	if mkdir -p "$RUNDIR" 2>/dev/null; then
+		printf 'kernel=%s\nreason=%s\nmodule=%s\n' "$KVER" "$REASON" "$STOCK" \
+			> "$RUNDIR/fallback" 2>/dev/null || :
+	fi
+	exit 0
+fi
+
+log "driver rejected ($REASON) and the standard snd-usb-audio failed too: $(reason_of "$ERR2")"
+[ "$RC2" -ne 0 ] || RC2=1
+exit "$RC2"

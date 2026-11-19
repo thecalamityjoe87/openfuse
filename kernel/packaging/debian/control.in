@@ -1,0 +1,23 @@
+Package: openfuse-dkms
+Version: @VERSION@
+Architecture: all
+Maintainer: OpenFuse contributors <openfuse@invalid>
+Installed-Size: @SIZE@
+Depends: dkms, patch, make
+Recommends: curl | wget, mokutil, pkexec
+Suggests: git, zstd
+Section: kernel
+Priority: optional
+Description: Arturia MiniFuse control support for snd-usb-audio (DKMS)
+ OpenFuse adds the controls of the Arturia MiniFuse USB audio interfaces
+ (INST and 48V switches, direct monitor mono, loopback mixer, level
+ meters) to the ALSA snd-usb-audio driver as a mixer quirk.
+ .
+ This package rebuilds snd-usb-audio with DKMS for every installed kernel
+ that has headers, from the sound/usb sources matching that kernel
+ (downloaded, cached, or bundled in the package). Kernels for which no
+ usable sources are found, or for which the module would not load under
+ Secure Boot, are skipped and keep the distribution's snd-usb-audio.
+ .
+ Includes /usr/libexec/openfuse/openfuse-setup, a polkit-enabled helper
+ for the OpenFuse installer (Secure Boot key enrollment, build, restore).

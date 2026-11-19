@@ -1,0 +1,13 @@
+Package: openfuse
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: OpenFuse contributors <openfuse@invalid>
+Installed-Size: @SIZE@
+Depends: libc6 (>= @GLIBC@), libgcc-s1, libasound2t64 | libasound2, openfuse-dkms (= @VERSION@)
+Section: sound
+Priority: optional
+Description: control panel for Arturia MiniFuse audio interfaces
+ OpenFuse controls the settings of Arturia MiniFuse USB audio interfaces on
+ Linux: instrument inputs, phantom power, direct monitoring, the loopback
+ mixer and level meters. Audio itself already works with the standard driver;
+ the controls are provided by the openfuse-dkms kernel module.

@@ -1,0 +1,6 @@
+openfuse (@VERSION@) unstable; urgency=medium
+
+  * Initial release: Arturia MiniFuse 2 mixer quirk for snd-usb-audio,
+    DKMS packaging with exact, cached, bundled and upstream source lookup.
+
+ -- OpenFuse contributors <openfuse@invalid>  @DATE@

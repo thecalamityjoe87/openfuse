@@ -1,0 +1,32 @@
+#!/bin/sh
+# postrm for openfuse-dkms: final cleanup. On remove the system is back to
+# the distribution's snd-usb-audio; purge also deletes caches and
+# configuration. Always exits 0.
+
+NAME=openfuse
+VERSION=@VERSION@
+
+@CLEANUP@
+
+case "$1" in
+remove|purge|abort-install|abort-upgrade|disappear)
+	# prerm normally did this already; repeat in case it could not run
+	restore_and_sweep ""
+	rm -rf "$RUNDIR" 2>/dev/null || true
+	# build output left by manual builds as root in the source tree
+	rm -rf "$SRCROOT/$NAME-$VERSION/build" "$SRCROOT/$NAME-$VERSION/.cache" 2>/dev/null || true
+	rmdir "$SRCROOT/$NAME-$VERSION" 2>/dev/null || true
+	;;
+esac
+
+if [ "$1" = purge ]; then
+	rm -rf "$CACHEDIR" "$CONFDIR" 2>/dev/null || true
+	# dkms state, if dkms itself no longer tracks it (archived originals
+	# were restored above)
+	if ! command -v dkms >/dev/null 2>&1 ||
+	   [ -z "$(dkms status -m "$NAME" 2>/dev/null || true)" ]; then
+		rm -rf "$DKMSTREE/$NAME" 2>/dev/null || true
+	fi
+fi
+
+exit 0

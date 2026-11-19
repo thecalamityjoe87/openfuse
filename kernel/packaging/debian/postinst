@@ -1,0 +1,53 @@
+#!/bin/sh
+# postinst for openfuse-dkms: add the DKMS module and build/install it for
+# every kernel that has headers. Never fails the package: a kernel that
+# cannot be built for keeps the distribution's snd-usb-audio.
+
+NAME=openfuse
+VERSION=@VERSION@
+
+warn() { echo "openfuse-dkms: $*" >&2; }
+
+dkms_setup() {
+	if ! command -v dkms >/dev/null 2>&1; then
+		warn "dkms not found; module not built"
+		return 0
+	fi
+
+	# Make sure the key dkms signs with exists, even if the build below is
+	# skipped by the Secure Boot guard, so the installer can enroll it
+	# (openfuse-setup enroll). Nothing is enrolled here.
+	if [ -r /usr/libexec/openfuse/openfuse-mok.sh ]; then
+		if ! ( . /usr/libexec/openfuse/openfuse-mok.sh && of_ensure_key ); then
+			warn "could not create the module signing key"
+		fi
+	fi
+
+	if [ -z "$(dkms status -m "$NAME" -v "$VERSION" 2>/dev/null)" ]; then
+		if ! dkms add -m "$NAME" -v "$VERSION"; then
+			warn "dkms add failed; module not built"
+			return 0
+		fi
+	fi
+
+	for build in /lib/modules/*/build; do
+		[ -f "$build/Makefile" ] || continue
+		kver="$(basename "$(dirname "$build")")"
+		if dkms install -m "$NAME" -v "$VERSION" -k "$kver"; then
+			:
+		else
+			warn "not installed for $kver (exit $?); the stock snd-usb-audio stays in use there"
+		fi
+	done
+
+	warn "installed modules take effect after a reboot or a replug of the device"
+	warn "(after reloading snd-usb-audio). Status: /usr/libexec/openfuse/openfuse-setup status"
+}
+
+case "$1" in
+configure)
+	dkms_setup || true
+	;;
+esac
+
+exit 0
