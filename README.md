@@ -2,7 +2,7 @@
   <img src="docs/icon.svg" alt="OpenFuse icon" width="128">
 </p>
 
-# OpenFuse
+<h1 align="center">OpenFuse</h1>
 
 A Linux control panel for the Arturia MiniFuse family of USB audio
 interfaces: MiniFuse 1, MiniFuse 2 and MiniFuse 4.
